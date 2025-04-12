@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>U.S. States Choropleth Map (Drive Version)</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1' />
+    <script src='https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js'></script>
+    <link href='https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css' rel='stylesheet' />
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        #sidebar {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            width: 300px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            z-index: 1;
+        }
+        #auth-panel {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        #app-content { display: none; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select, button { width: 100%; padding: 8px; box-sizing: border-box; }
+        button { background: #4CAF50; color: white; border: none; cursor: pointer; margin-top: 5px; }
+        button:hover { background: #45a049; }
+        button.reset { background: #f44336; }
+        button.reset:hover { background: #d32f2f; }
+        #password-error { color: red; margin-top: 10px; display: none; }
+    </style>
+</head>
+<body>
+    <div id="auth-panel">
+        <h2>Choropleth Map Access</h2>
+        <div class="form-group">
+            <label for="password-input">Enter Shared Password:</label>
+            <input type="password" id="password-input" placeholder="Password">
+            <button id="login-btn">Unlock App</button>
+            <div id="password-error">Incorrect password. Please try again.</div>
+        </div>
+    </div>
+
+    <div id="app-content">
+        <div id="sidebar">
+            <h2>State Controls</h2>
+            <div class="form-group">
+                <label for="state-select">Select State:</label>
+                <select id="state-select"></select>
+            </div>
+            <div class="form-group">
+                <label for="state-value">State Value (0-10):</label>
+                <input type="number" id="state-value" min="0" max="10" value="0">
+            </div>
+            <div class="form-group">
+                <button id="update-state">Update State</button>
+                <button id="reset-state" class="reset">Reset Value</button>
+            </div>
+            <div class="form-group">
+                <button id="save-to-drive">Save to Google Drive</button>
+                <button id="load-from-drive">Reload from Drive</button>
+            </div>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script>
+        // ===== CONFIGURATION ===== //
+		https://drive.google.com/file/d/1CKvVKjGrDqwIRJmrq7FLL9YmvyEEhLGo/view?usp=drive_link
+        const DRIVE_FILE_ID = '1CKvVKjGrDqwIRJmrq7FLL9YmvyEEhLGo'; // Replace with your JSON file's ID
+        const SHARED_PASSWORD = "IKnowWhy"; // Change this to your shared password
+        
+        // ===== APP STATE ===== //
+        let stateData = {};
+        const states = [
+            { code: 'AL', name: 'Alabama' }, /* ... include all 50 states ... */ 
+            { code: 'WY', name: 'Wyoming' }
+        ];
+
+        // ===== PASSWORD PROTECTION ===== //
+        document.getElementById('login-btn').addEventListener('click', () => {
+            const password = document.getElementById('password-input').value;
+            if (password === SHARED_PASSWORD) {
+                document.getElementById('auth-panel').style.display = 'none';
+                document.getElementById('app-content').style.display = 'block';
+                initializeApp();
+            } else {
+                document.getElementById('password-error').style.display = 'block';
+            }
+        });
+
+        // ===== MAIN APP ===== //
+        function initializeApp() {
+            // Initialize map (same as previous implementation)
+            const map = new maplibregl.Map({
+                container: 'map',
+                style: 'https://demotiles.maplibre.org/style.json',
+                center: [-98.5795, 39.8283],
+                zoom: 3.5
+            });
+
+            // Initialize state data
+            function initializeStateData() {
+                states.forEach(state => {
+                    stateData[state.code] = {
+                        name: state.name,
+                        value: 0,
+                        originalValue: 0
+                    };
+                });
+                
+                const stateSelect = document.getElementById('state-select');
+                states.forEach(state => {
+                    const option = document.createElement('option');
+                    option.value = state.code;
+                    option.textContent = state.name;
+                    stateSelect.appendChild(option);
+                });
+            }
+
+            // Load data from Google Drive
+            async function loadData() {
+                try {
+                    const url = `https://drive.google.com/uc?export=download&id=${DRIVE_FILE_ID}`;
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    
+                    // Merge with default data
+                    for (const code in data) {
+                        if (stateData[code]) {
+                            stateData[code].value = data[code].value;
+                            stateData[code].originalValue = data[code].value;
+                        }
+                    }
+                    
+                    updateMap();
+                    updateStateDisplay();
+                } catch (error) {
+                    console.error('Error loading data:', error);
+                    alert("Could not load data from Drive. Using default values.");
+                    updateMap();
+                }
+            }
+
+            // Save data to Google Drive (manual user flow)
+            document.getElementById('save-to-drive').addEventListener('click', () => {
+                const blob = new Blob([JSON.stringify(stateData)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                
+                // This prompts the user to save the file to their own Drive
+                window.open(`https://drive.google.com/drive/u/0/?action=upload&filename=stateData_${new Date().toISOString().split('T')[0]}.json&uploadType=blob&bloburl=${encodeURIComponent(url)}`);
+            });
+
+            // Reload data
+            document.getElementById('load-from-drive').addEventListener('click', loadData);
+
+            // Rest of your choropleth map implementation...
+            // (Include all the map styling, update functions, etc. from the original solution)
+            
+            // Initialize the app
+            initializeStateData();
+            loadData();
+        }
+    </script>
+</body>
+</html>
